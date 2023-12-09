@@ -16,41 +16,23 @@ Dibantu dengan saya console untuk mempermudah dalam development aplikasi Anda.
 
 See in file /routes/routes.php
 
-## Play with this application
-
-Here are the commands to play with this application like tinker in laravel.
-For example you can get data from a database or insert, update, delete, etc.
-
-```bash
-php saya play
-```
-
 ## Deployment on vercel
-
 - Clone or download this repository
-
     ```bash
-    git clone https://github.com/dewanakl/undangan-api.git
+    git clone https://github.com/dewanakl/DikitLink.git
     ```
-
 - Install package
-
     ```bash
     composer install
     ```
-
 - Create .env file
-
     ```bash
     cp .env.example .env
     ```
-
 - Create key application
-
     ```bash
     php saya key
     ```
-
 - Push on your github.
 - Create new project in vercel.
 - Import from your repository.
@@ -64,8 +46,6 @@ php saya play
   - DB_DRIV (type cloud dbms [ex. mysql or pgsql])
   - JWT_KEY [ex. 123]
   - HTTPS [true]
-  - DEBUG [false]
-  - LOG [false]
   - COOKIE [false]
   - APP_KEY [copy from your local env]
 - Click deployments tab in vercel project.
@@ -74,21 +54,15 @@ php saya play
 - Finish.
 
 ## Get Started Project
-
 - Create a project with composer
-
     ```bash
     composer create-project kamu/kamu coba-app
     ```
-
 - Move the folder
-
     ```bash
     cd coba-app
     ```
-
 - Run in development server
-
     ```bash
     php saya coba
     ```

@@ -2,144 +2,233 @@
 
 namespace App\Controllers;
 
-use App\Middleware\UuidMiddleware;
-use App\Repositories\CommentContract;
-use App\Repositories\LikeContract;
+use App\Models\Comment;
+use App\Models\Like;
 use App\Response\JsonResponse;
-use Core\Auth\Auth;
 use Core\Database\DB;
 use Core\Routing\Controller;
 use Core\Http\Request;
-use Core\Http\Respond;
 use Core\Valid\Validator;
+use Ramsey\Uuid\Uuid;
 use Throwable;
 
 class CommentController extends Controller
 {
-    private $comment;
     private $json;
 
-    public function __construct(CommentContract $comment, JsonResponse $json)
+    public function __construct(JsonResponse $json)
     {
         $this->json = $json;
-        $this->comment = $comment;
     }
 
     public function get(Request $request): JsonResponse
     {
         $valid = $this->validate($request, [
             'next' => ['nullable', 'int'],
-            'per' => ['required', 'int', 'max:10']
+            'per' => ['required', 'int', 'max:50']
         ]);
 
         if ($valid->fails()) {
-            return $this->json->errorBadRequest($valid->messages());
+            return $this->json->error($valid->messages(), 400);
         }
 
-        return $this->json->successOK($this->comment->getAll(
-            Auth::id(),
-            $valid->per,
-            ($valid->next ?? 0)
-        ));
+        $data = Comment::with('comments')
+            ->select(['uuid', 'nama', 'hadir', 'komentar', 'created_at'])
+            ->where('user_id', context()->user->id)
+            ->whereNull('parent_id')
+            ->orderBy('id', 'DESC')
+            ->limit(abs($valid->per))
+            ->offset($valid->next ?? 0)
+            ->get();
+
+        return $this->json->success($data, 200);
     }
 
-    #[UuidMiddleware]
     public function show(string $id): JsonResponse
     {
-        $comment = $this->comment->getByUuid(Auth::id(), $id);
-
-        if (!$comment->exist()) {
-            return $this->json->errorNotFound();
-        }
-
-        return $this->json->successOK($comment->only(['nama', 'hadir', 'komentar', 'created_at']));
-    }
-
-    #[UuidMiddleware]
-    public function like(string $id, LikeContract $like): JsonResponse
-    {
-        $comment = $this->comment->getByUuid(Auth::id(), $id);
-
-        if (!$comment->exist()) {
-            return $this->json->errorNotFound();
-        }
-
-        return $this->json->success(
-            $like->create(Auth::id(), $comment->uuid)->only('uuid'),
-            Respond::HTTP_CREATED
+        $valid = Validator::make(
+            [
+                'id' => $id
+            ],
+            [
+                'id' => ['required', 'str', 'trim', 'uuid', 'max:37']
+            ]
         );
+
+        if ($valid->fails()) {
+            return $this->json->error($valid->messages(), 400);
+        }
+
+        $data = Comment::where('uuid', $valid->id)
+            ->where('user_id', context()->user->id)
+            ->limit(1)
+            ->select(['nama', 'hadir', 'komentar', 'created_at'])
+            ->first()
+            ->exist();
+
+        if (!$data) {
+            return $this->json->error(['not found'], 404);
+        }
+
+        return $this->json->success($data, 200);
     }
 
-    #[UuidMiddleware]
-    public function unlike(string $id, LikeContract $like): JsonResponse
+    public function like(string $id): JsonResponse
     {
-        $like = $like->getByUuid(Auth::id(), $id);
+        $valid = Validator::make(
+            [
+                'id' => $id
+            ],
+            [
+                'id' => ['required', 'str', 'trim', 'uuid', 'max:37']
+            ]
+        );
 
-        if (!$like->exist()) {
-            return $this->json->errorNotFound();
+        if ($valid->fails()) {
+            return $this->json->error($valid->messages(), 400);
         }
 
-        if ($like->destroy() == 1) {
-            return $this->json->successOK(['status' => true]);
+        $data = Comment::where('uuid', $valid->id)
+            ->where('user_id', context()->user->id)
+            ->limit(1)
+            ->first()
+            ->exist();
+
+        if (!$data) {
+            return $this->json->error(['not found'], 404);
         }
 
-        return $this->json->errorServer();
+        $like = Like::create([
+            'uuid' => Uuid::uuid4()->toString(),
+            'comment_id' => $data->uuid,
+            'user_id' => context()->user->id
+        ]);
+
+        return $this->json->success($like->only('uuid'), 201);
     }
 
-    #[UuidMiddleware]
+    public function unlike(string $id): JsonResponse
+    {
+        $valid = Validator::make(
+            [
+                'id' => $id
+            ],
+            [
+                'id' => ['required', 'str', 'trim', 'uuid', 'max:37']
+            ]
+        );
+
+        if ($valid->fails()) {
+            return $this->json->error($valid->messages(), 400);
+        }
+
+        $data = Like::where('uuid', $valid->id)
+            ->where('user_id', context()->user->id)
+            ->limit(1)
+            ->first()
+            ->exist();
+
+        if (!$data) {
+            return $this->json->error(['not found'], 404);
+        }
+
+        $status = $data->destroy();
+
+        if ($status == 1) {
+            return $this->json->success([
+                'status' => true
+            ], 200);
+        }
+
+        return $this->json->error(['server error'], 500);
+    }
+
     public function destroy(string $id): JsonResponse
     {
-        $comment = $this->comment->getByOwnid(Auth::id(), $id);
+        $valid = Validator::make(
+            [
+                'id' => $id
+            ],
+            [
+                'id' => ['required', 'str', 'trim', 'uuid', 'max:37']
+            ]
+        );
 
-        if (!$comment->exist()) {
-            return $this->json->errorNotFound();
+        if ($valid->fails()) {
+            return $this->json->error($valid->messages(), 400);
+        }
+
+        $data = Comment::where('own', $valid->id)
+            ->where('user_id', context()->user->id)
+            ->limit(1)
+            ->first()
+            ->exist();
+
+        if (!$data) {
+            return $this->json->error(['not found'], 404);
         }
 
         try {
-            $status = DB::transaction(function (LikeContract $like) use ($comment): int {
-                $like->deleteByCommentID($comment->uuid);
-                $this->comment->deleteByParrentID($comment->uuid);
+            DB::beginTransaction();
 
-                return $comment->destroy();
-            });
+            Like::where('comment_id', $data->uuid)->delete();
+            Comment::where('parent_id', $data->uuid)->delete();
 
-            if ($status == 1) {
-                return $this->json->successOK(['status' => true]);
-            }
-
-            return $this->json->errorServer();
+            DB::commit();
         } catch (Throwable) {
-            return $this->json->errorServer();
-        }
-    }
-
-    #[UuidMiddleware]
-    public function update(string $id, Request $request): JsonResponse
-    {
-        $valid = $this->validate($request, [
-            'hadir' => ['bool'],
-            'komentar' => ['required', 'str', 'max:500'],
-        ]);
-
-        if ($valid->fails()) {
-            return $this->json->errorBadRequest($valid->messages());
+            DB::rollBack();
+            return $this->json->error(['server error'], 500);
         }
 
-        $comment = $this->comment->getByOwnid(Auth::id(), $id);
-
-        if (!$comment->exist()) {
-            return $this->json->errorNotFound();
-        }
-
-        $status = $comment->only(['id', 'hadir', 'komentar'])
-            ->fill($valid->only(['hadir', 'komentar']))
-            ->save();
+        $status = $data->destroy();
 
         if ($status == 1) {
-            return $this->json->successOK(['status' => true]);
+            return $this->json->success([
+                'status' => true
+            ], 200);
         }
 
-        return $this->json->errorServer();
+        return $this->json->error(['server error'], 500);
+    }
+
+    public function update(string $id, Request $request): JsonResponse
+    {
+        $valid = Validator::make(
+            [
+                'id' => $id,
+                ...$request->only(['hadir', 'komentar'])
+            ],
+            [
+                'id' => ['required', 'str', 'trim', 'uuid', 'max:37'],
+                'hadir' => ['bool'],
+                'komentar' => ['required', 'str', 'max:500'],
+            ]
+        );
+
+        if ($valid->fails()) {
+            return $this->json->error($valid->messages(), 400);
+        }
+
+        $data = Comment::where('own', $valid->id)
+            ->where('user_id', context()->user->id)
+            ->limit(1)
+            ->select(['id', 'hadir', 'komentar'])
+            ->first()
+            ->exist();
+
+        if (!$data) {
+            return $this->json->error(['not found'], 404);
+        }
+
+        $status = $data->fill($valid->only(['hadir', 'komentar']))->save();
+
+        if ($status == 1) {
+            return $this->json->success([
+                'status' => true
+            ], 200);
+        }
+
+        return $this->json->error(['server error'], 500);
     }
 
     public function create(Request $request): JsonResponse
@@ -161,18 +250,20 @@ class CommentController extends Controller
         );
 
         if ($valid->fails()) {
-            return $this->json->errorBadRequest($valid->messages());
+            return $this->json->error($valid->messages(), 400);
         }
 
-        $comment = $this->comment->create([
-            ...$valid->except(['id']),
-            'user_id' => Auth::id(),
-            'parent_id' => $valid->id
-        ]);
+        $data = $valid->except(['id']);
+        $data['parent_id'] = $valid->id;
+        $data['uuid'] = Uuid::uuid4()->toString();
+        $data['own'] = Uuid::uuid4()->toString();
+        $data['user_id'] = context()->user->id;
+
+        $comment = Comment::create($data);
 
         return $this->json->success(
             $comment->only(['nama', 'hadir', 'komentar', 'uuid', 'own', 'created_at']),
-            Respond::HTTP_CREATED
+            201
         );
     }
 }
